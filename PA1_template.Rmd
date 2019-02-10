@@ -4,22 +4,145 @@ output:
   html_document:
     keep_md: true
 ---
-
+## Load some useful packages.
+```{r}
+library(lubridate)
+library(dplyr)
+library(data.table)
+library(lattice)
+```
 
 ## Loading and preprocessing the data
 
+First we need to load the fitness tracker data from the website. 
+
+```{r}
+
+if (!file.exists('data')) {
+        dir.create('data')
+}
+
+fileUrl <- 'https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip'
+temp = tempfile()
+download.file(fileUrl, destfile = ".\\data\\steps.zip")
+fitness <- read.csv(unz(".\\data\\steps.zip", 'activity.csv'), stringsAsFactors = FALSE)
+
+head(fitness)
+```
 
 
 ## What is mean total number of steps taken per day?
 
+Now we compute the total number of steps taken each day and plot a histogram of it.
+```{r}
+total_steps_per_day <- fitness %>% group_by(date) %>% summarize(steps = sum(steps, na.rm = TRUE))
+
+hist(total_steps_per_day$steps, breaks = 10, xlab = 'Total number of steps per day', main = '', col = 'blue')
+```
+
+Next we calculate the mean and median of the total number of steps taken per day:
+```{r}
+mean_steps_per_day <- mean(total_steps_per_day$steps, na.rm = T)
+median_steps_per_day <- median(total_steps_per_day$steps, na.rm = T)
+
+print(paste('The mean number of steps per day is', round(mean_steps_per_day)))
+
+print(paste('The median number of steps per day is', round(median_steps_per_day)))
+
+```
 
 
 ## What is the average daily activity pattern?
 
+We group the data by interval instead of date in order to compute the average number of steps in each interval across all days, and plot a time series plot of the acitivity pattern.
 
+```{r}
+mean_steps_by_interval <- fitness %>% group_by(interval) %>% summarize(steps = mean(steps, na.rm = TRUE))
+plot(mean_steps_by_interval$interval, mean_steps_by_interval$steps, type = 'l', xlab = 'Interval', ylab = 'Number of steps')
+
+```
+
+Next, we calculate the interval with the maximum number of steps on average:
+
+```{r}
+truth <- max(mean_steps_by_interval$steps)
+max_steps <- mean_steps_by_interval$interval[mean_steps_by_interval$steps == truth]
+
+print(paste('The interval with the maximum number of steps on average is',max_steps))
+```
 
 ## Imputing missing values
 
+What is the total number of missing values?
+```{r}
+missing_data <- is.na(fitness$steps)
+total_missing_data <- sum(missing_data)
+print(paste('The total number of missing values is', total_missing_data))
+```
+
+In order to devise a strategy how to impute the missing data values we first need to find out if there is some structure to which data is missing. For example, is data missing for a complete day, is data missing for one interval for all days, etc.
+
+```{r}
+print('Table of intervals with missing data.')
+table(fitness$interval[missing_data])
+print('Table of days with missing data.')
+table(fitness$date[missing_data])
+print(paste('Number of measurements for one day', length(unique(fitness$interval))))
+
+
+total_steps_per_day <- fitness %>% group_by(date) %>% summarize(steps = sum(steps, na.rm = F))
+
+print(paste('Number of days that have no recorded tracking data',sum(is.na(total_steps_per_day$steps))))
+```
+
+We can see that 8 whole days of measurements are missing. So instead of imputing missing data on a per day basis the most promising approach for now is to use the intervals from other days to impute the missing data.
+
+```{r}
+
+fitness_imputed <- copy(fitness)
+missing_data_ind <- which(missing_data)
+for (i in missing_data_ind) {fitness_imputed$steps[i] <- median(fitness_imputed$steps[fitness_imputed$interval == fitness_imputed$interval[i]], na.rm = TRUE)}
+
+head(fitness_imputed)
+```
+
+Let's see how the data has changed after the missing values have been replaced with the median value of the other intervals.
+
+```{r}
+total_steps_per_day_imputed <- fitness_imputed %>% group_by(date) %>% summarize(steps = sum(steps, na.rm = TRUE))
+
+hist(total_steps_per_day_imputed$steps, breaks = 10, xlab = 'Total number of steps per day', main = '', col = 'blue')
+
+mean_steps_per_day_imputed <- mean(total_steps_per_day_imputed$steps)
+median_steps_per_day_imputed <- median(total_steps_per_day_imputed$steps)
+
+print(paste('The mean number of steps per day after imputing missing values is', round(mean_steps_per_day_imputed)))
+
+print(paste('The median number of steps per day after imputing missing values is', round(median_steps_per_day_imputed)))
+```
+
+We see that the mean number of steps has increased while the median number of steps has remained unchanged.
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+In the last part we will check if there are differences during weekdays and weekends for the activity patterns.
+
+```{r}
+workday <- c('Monday','Tuesday','Wednesday', 'Thursday', 'Friday')
+fitness_imputed$weekend <- ifelse(weekdays(ymd(fitness_imputed$date)) %in% workday,'Weekday','Weekend')
+fitness_imputed$weekend <- factor(fitness_imputed$weekend, levels = c('Weekday', 'Weekend'))
+
+head(fitness_imputed)
+```
+
+Plot the average activity pattern for weekdays and weekends.
+```{r}
+fitness_imputed_weekday <- fitness_imputed %>% group_by(weekend, interval) %>% summarize(steps = mean(steps, na.rm = TRUE))
+
+xyplot(steps ~ interval | weekend, data = fitness_imputed_weekday, layout = c(1,2), xlab = 'Interval', ylab = 'Number of Steps', type = 'l')
+
+```
+
+What we could do next:
+As the activity pattern for weekdays and weekends is noticeably different we should test how the results change if we impute missing data separately for these two. 
